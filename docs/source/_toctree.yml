@@ -27,6 +27,8 @@
     title: SO-101
   - local: so100
     title: SO-100
+  - local: giraffe
+    title: Giraffe
   - local: koch
     title: Koch v1.1
   - local: lekiwi

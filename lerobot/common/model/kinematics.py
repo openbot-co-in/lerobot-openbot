@@ -143,7 +143,7 @@ class RobotKinematics:
         """Initialize kinematics for the specified robot type.
 
         Args:
-            robot_type: String specifying the robot model ("koch", "so100", or "moss")
+            robot_type: String specifying the robot model ("koch", "so100", "giraffe", or "moss")
         """
         if robot_type not in self.ROBOT_MEASUREMENTS:
             raise ValueError(

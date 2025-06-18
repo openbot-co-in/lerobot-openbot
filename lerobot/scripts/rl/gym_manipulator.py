@@ -20,7 +20,7 @@ Robot Environment for LeRobot Manipulation Tasks
 
 This module provides a comprehensive gym-compatible environment for robot manipulation
 with support for:
-- Multiple robot types (SO100, SO101, Koch and Moss)
+- Multiple robot types (SO100, SO101, Koch, Giraffe and Moss)
 - Human intervention via leader-follower control or gamepad
 
 - End-effector and joint space control
@@ -1096,6 +1096,10 @@ class EEObservationWrapper(gym.ObservationWrapper):
             # Note to be compatible with the rest of the codebase,
             # we are using the new calibration method for so101 and so100
             robot_type = "so_new_calibration"
+        if "giraffe" in robot_type:
+            # Note to be compatible with the rest of the codebase,
+            # we are using the new calibration method for giraffe
+            robot_type = "giraffe_new_calibration"
         self.kinematics = RobotKinematics(robot_type)
 
     def observation(self, observation):
@@ -1162,6 +1166,10 @@ class BaseLeaderControlWrapper(gym.Wrapper):
             # Note to be compatible with the rest of the codebase,
             # we are using the new calibration method for so101 and so100
             robot_type = "so_new_calibration"
+        if "giraffe" in robot_type:
+            # Note to be compatible with the rest of the codebase,
+            # we are using the new calibration method for giraffe
+            robot_type = "giraffe_new_calibration"
         self.kinematics = RobotKinematics(robot_type)
         self.leader_torque_enabled = True
         self.prev_leader_gripper = None

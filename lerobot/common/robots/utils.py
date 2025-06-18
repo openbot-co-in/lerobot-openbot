@@ -33,6 +33,14 @@ def make_robot_from_config(config: RobotConfig) -> Robot:
         from .so100_follower import SO100FollowerEndEffector
 
         return SO100FollowerEndEffector(config)
+    elif config.type == "giraffe_follower":
+        from .giraffe_follower import GiraffeFollower
+
+        return GiraffeFollower(config)
+    elif config.type == "giraffe_follower_end_effector":
+        from .giraffe_follower import GiraffeFollowerEndEffector
+
+        return GiraffeFollowerEndEffector(config)
     elif config.type == "so101_follower":
         from .so101_follower import SO101Follower
 

@@ -42,6 +42,7 @@ from lerobot.common.robots import (  # noqa: F401
     koch_follower,
     make_robot_from_config,
     so100_follower,
+    giraffe_follower,
 )
 from lerobot.common.teleoperators import (  # noqa: F401
     TeleoperatorConfig,
@@ -49,6 +50,7 @@ from lerobot.common.teleoperators import (  # noqa: F401
     koch_leader,
     make_teleoperator_from_config,
     so100_leader,
+    giraffe_leader,
 )
 
 
@@ -76,6 +78,10 @@ def find_joint_and_ee_bounds(cfg: FindJointLimitsConfig):
         # Note to be compatible with the rest of the codebase,
         # we are using the new calibration method for so101 and so100
         robot_type = "so_new_calibration"
+    if "giraffe" in robot_type:
+        # Note to be compatible with the rest of the codebase,
+        # we are using the new calibration method for giraffe
+        robot_type = "giraffe_new_calibration"
     kinematics = RobotKinematics(robot_type=robot_type)
 
     # Initialize min/max values

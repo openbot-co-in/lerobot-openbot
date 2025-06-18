@@ -607,8 +607,12 @@ def make_robot_config(robot_type: str, **kwargs) -> RobotConfig:
         return KochFollowerConfig(**kwargs)
     elif robot_type == "so100_follower":
         from lerobot.common.robots.so100_follower import SO100FollowerConfig
-
+    
         return SO100FollowerConfig(**kwargs)
+    elif robot_type == "giraffe_follower":
+        from lerobot.common.robots.giraffe_follower import GiraffeFollowerConfig
+
+        return GiraffeFollowerConfig(**kwargs)
     elif robot_type == "stretch":
         from lerobot.common.robots.stretch3 import Stretch3RobotConfig
 
@@ -650,7 +654,7 @@ def main():
         "--robot",
         type=str,
         default=None,
-        help="Robot config used for the dataset during conversion (e.g. 'koch', 'aloha', 'so100', etc.)",
+        help="Robot config used for the dataset during conversion (e.g. 'koch', 'aloha', 'so100', 'giraffe' etc.)",
     )
     parser.add_argument(
         "--local-dir",
