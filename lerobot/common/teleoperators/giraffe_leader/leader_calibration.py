@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 from tabulate import tabulate
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,11 @@ class JointData:
         """Get the size of the joint's range."""
         return self.max_val - self.min_val
 
+    @staticmethod
+    def name_to_index(name: str) -> int:
+        mapping = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
+        return mapping.index(name)
+
 class CalibrationDataGenerator:
     """
     Collects AS5600 readings for calibration.
@@ -65,6 +71,7 @@ class CalibrationDataGenerator:
         self.ser: Optional[serial.Serial] = None
         self.values: List[int] = []
         self.values_lock = threading.Lock()
+        self.run_lock = threading.Lock()
         self.running = False
         self.display_running = False
         self.joints = [
@@ -75,6 +82,9 @@ class CalibrationDataGenerator:
             JointData("wrist_roll"),
             JointData("gripper")
         ]
+        self.middle_position: Optional[list[int]] = None  # Store after step 1
+        self.shifted_min = [4095] * 6  # For step 2 display
+        self.shifted_max = [0] * 6
 
     def _read_one_raw(self) -> None:
         """Continuously read values from serial port."""
@@ -110,43 +120,58 @@ class CalibrationDataGenerator:
                 logger.warning(f"Error reading from serial port: {e}")
                 time.sleep(0.1)  # Add delay on error to prevent tight loop
 
+    def _shift_for_display(self, value: int, middle: int) -> int:
+        """Shift encoder value so that middle is at 2048, wrap to [0, 4095]."""
+        return (value - middle + 2048) % 4096
+
     def _display_joint_values(self, step: int) -> None:
         """Display current joint values in a table format."""
         while self.display_running:
             try:
-                # Create table data
                 table_data = []
-                for joint in self.joints:
-                    row = [
-                        joint.name,
-                        f"{joint.current_val:4d}",
-                        f"{joint.min_val:4d}",
-                        f"{joint.max_val:4d}",
-                        f"{joint.get_range_size():4d}"
-                    ]
-                    table_data.append(row)
+                if step == 2 and self.middle_position is not None:
+                    # Display shifted values for step 2
+                    for i, joint in enumerate(self.joints):
+                        shifted_current = self._shift_for_display(joint.current_val, self.middle_position[i])
+                        self.shifted_min[i] = min(self.shifted_min[i], shifted_current)
+                        self.shifted_max[i] = max(self.shifted_max[i], shifted_current)
+                        shifted_range = self.shifted_max[i] - self.shifted_min[i]
+                        row = [
+                            joint.name,
+                            f"{shifted_current:4d}",
+                            f"{self.shifted_min[i]:4d}",
+                            f"{self.shifted_max[i]:4d}",
+                            f"{shifted_range:4d}"
+                        ]
+                        table_data.append(row)
+                else:
+                    # Step 1 or fallback: show raw values
+                    for joint in self.joints:
+                        row = [
+                            joint.name,
+                            f"{joint.current_val:4d}",
+                            f"{joint.min_val:4d}",
+                            f"{joint.max_val:4d}",
+                            f"{joint.get_range_size():4d}"
+                        ]
+                        table_data.append(row)
 
-                # Clear screen and display instructions
                 print("\033[2J\033[H")  # Clear screen and move cursor to top
-                
                 if step == 1:
                     print("\n=== STEP 1: MIDDLE POSITION ===")
                     print("1. Move all joints to their middle positions")
                     print("2. Press ENTER to start sampling")
-                else:
+                elif step == 2:
                     print("\n=== STEP 2: FULL RANGE OF MOTION ===")
                     print("1. Move all joints through their full range of motion")
                     print("2. Press ENTER when done")
-                
                 print("\nCurrent Values:")
                 print(tabulate(
                     table_data,
                     headers=["Joint", "Current", "Min", "Max", "Range"],
                     tablefmt="grid"
                 ))
-                
-                time.sleep(0.05)  # Update at 20Hz
-                
+                time.sleep(0.05)
             except Exception as e:
                 logger.warning(f"Error displaying values: {e}")
                 time.sleep(0.1)
@@ -158,17 +183,43 @@ class CalibrationDataGenerator:
         display_thread.daemon = True
         display_thread.start()
 
+    def _shift_and_unwrap(self, values: list[int], middle: int) -> list[float]:
+        """Shift encoder readings so that middle is zero, then unwrap as continuous ticks."""
+        # Shift readings so that middle is logical zero
+        shifted = [((v - middle + 2048) % 4096) - 2048 for v in values]
+        # Convert to radians
+        radians = np.array(shifted) * 2 * np.pi / 4096
+        unwrapped = np.unwrap(radians)
+        # Convert back to ticks
+        ticks = unwrapped * 4096 / (2 * np.pi)
+        return ticks.tolist()
+
     def generate(self, output_file: str | Path) -> None:
         """
         Generate calibration data by collecting AS5600 readings in two poses:
         1. Middle position (homing)
-        2. Full range of motion for each joint
+        2. Full range of motion for each joint (unwrapped)
         """
         logger.info("\n=== CALIBRATION DATA GENERATION ===\n")
         
         try:
+            # Delete existing calibration file if it exists
+            output_path = Path(output_file).resolve()
+            if output_path.exists():
+                try:
+                    logger.info(f"Deleting existing calibration file: {output_path}")
+                    output_path.unlink(missing_ok=True)
+                    logger.info("Successfully deleted existing calibration file")
+                except Exception as e:
+                    logger.error(f"Failed to delete existing calibration file: {e}")
+                    raise
+            
+            # Ensure parent directory exists
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
             self.ser = serial.Serial(self.serial_port, self.baud_rate, timeout=1)
-            self.running = True
+            with self.run_lock:
+                self.running = True
             
             # Start reading thread
             read_thread = threading.Thread(target=self._read_one_raw)
@@ -178,9 +229,7 @@ class CalibrationDataGenerator:
             # Step 1: Middle position
             logger.info("Starting Step 1: Middle Position")
             self._monitor_values(1)
-            
             input("\nPress ENTER to start sampling middle position...")
-            
             # Sample middle position
             middle_values = []
             for _ in range(self.samples):
@@ -188,48 +237,70 @@ class CalibrationDataGenerator:
                     if len(self.values) == 6:
                         middle_values.append(self.values.copy())
                 time.sleep(self.sample_delay)
-            
             if not middle_values:
                 raise RuntimeError("No valid middle position values collected")
-            
             # Average the middle position values
             middle_position = [sum(vals) // len(vals) for vals in zip(*middle_values)]
+            self.middle_position = middle_position  # Store for step 2
             logger.info(f"Middle position values: {middle_position}")
-
-            # Step 2: Record full range of motion
+            # Step 2: Record full range of motion (unwrapped)
             logger.info("\nStarting Step 2: Full Range of Motion")
-            # Reset joint ranges for step 2
             for joint in self.joints:
                 joint.min_val = 4095
                 joint.max_val = 0
                 joint.samples = 0
-            
-            input("\nPress ENTER when you've moved all joints through their full range...")
-
-            # Prepare calibration data
+            self.shifted_min = [4095] * 6
+            self.shifted_max = [0] * 6
+            self.display_running = False
+            time.sleep(0.1)
+            self._monitor_values(2)
+            # Clear and start buffer collection BEFORE prompting user
+            step2_buffer = [[] for _ in range(6)]
+            collecting = True
+            def collect_step2():
+                while collecting:
+                    with self.values_lock:
+                        if len(self.values) == 6:
+                            for i in range(6):
+                                step2_buffer[i].append(self.values[i])
+                    time.sleep(self.sample_delay)
+            collector_thread = threading.Thread(target=collect_step2)
+            collector_thread.daemon = True
+            collector_thread.start()
+            print("\nMove ALL joints through their FULL range of motion NOW.\nWhen done, press ENTER to finish step 2...")
+            input()  # Wait for user to finish moving joints
+            collecting = False
+            collector_thread.join()
+            # Shift and unwrap all values for each joint
+            shifted_unwrapped_ranges = []
+            for i in range(6):
+                shifted_unwrapped = self._shift_and_unwrap(step2_buffer[i], middle_position[i])
+                shifted_unwrapped_ranges.append(shifted_unwrapped)
+            joint_ranges = []
+            for i in range(6):
+                min_val = int(np.min(shifted_unwrapped_ranges[i]))
+                max_val = int(np.max(shifted_unwrapped_ranges[i]))
+                joint_ranges.append((min_val, max_val))
             calibration_data = {
                 "middle_position": middle_position,
+                "offsets": middle_position,
             }
-            
-            # Add joint ranges
-            for joint in self.joints:
+            for i, joint in enumerate(self.joints):
                 calibration_data[joint.name] = {
-                    "range_min": joint.min_val,
-                    "range_max": joint.max_val
+                    "range_min": joint_ranges[i][0],
+                    "range_max": joint_ranges[i][1],
+                    "offset": middle_position[i]
                 }
-
-            # Save calibration data
             with open(output_file, "w") as f:
                 json.dump(calibration_data, f, indent=4)
-            
             logger.info(f"\nCalibration data saved to {output_file}")
-            
         except Exception as e:
             logger.error(f"Error during calibration: {e}")
             raise
         finally:
-            self.running = False
-            self.display_running = False
+            with self.run_lock:
+                self.running = False
+                self.display_running = False
             if self.ser:
                 self.ser.close()
                 self.ser = None

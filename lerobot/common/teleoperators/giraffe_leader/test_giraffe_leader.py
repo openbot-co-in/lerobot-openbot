@@ -47,12 +47,20 @@ def list_available_ports():
     print(tabulate(port_info, headers="keys", tablefmt="grid"))
     return [port.device for port in ports]
 
-def display_joint_positions(action):
-    """Display joint positions in a table format."""
-    joint_data = []
-    for joint, value in action.items():
-        joint_data.append([joint, f"{value:.2f}"])
-    print(tabulate(joint_data, headers=["Joint", "Position"], tablefmt="grid"))
+def display_joint_positions(raw_values, action):
+    """Display raw and normalized joint positions in a table format."""
+    joint_names = [
+        "shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"
+    ]
+    raw_data = []
+    norm_data = []
+    for i, joint in enumerate(joint_names):
+        raw_data.append([joint, f"{raw_values[i]}"])
+        norm_data.append([f"{joint}.pos", f"{action[f'{joint}.pos']:.2f}"])
+    print("RAW VALUES:")
+    print(tabulate(raw_data, headers=["Joint", "Raw Value"], tablefmt="grid"))
+    print("\nNORMALIZED VALUES:")
+    print(tabulate(norm_data, headers=["Joint", "Norm Value"], tablefmt="grid"))
 
 def main():
     # Set up logging
@@ -85,24 +93,32 @@ def main():
         device = GiraffeLeader(config)
         device.connect(calibrate=True)
 
-        # Test reading actions for 5 seconds
-        logger.info("\nReading actions for 5 seconds...")
-        print("Press Ctrl+C to stop early")
-        
-        start_time = time.time()
-        while time.time() - start_time < 5:
-            try:
+        # Test reading actions until stopped
+        logger.info("\nReading actions. Press Ctrl+C to stop...")
+        try:
+            while True:
                 action = device.get_action()
+                # Get the raw values from the device (simulate by reading from serial directly)
+                # We'll use the same logic as get_action to get the latest raw values
+                if device.serial_port is not None:
+                    device.serial_port.reset_input_buffer()
+                    data = device.serial_port.readline().decode('utf-8').strip()
+                    values = [v.strip() for v in data.split(',') if v.strip()]
+                    if len(values) == 6:
+                        try:
+                            raw_values = [int(v) for v in values]
+                        except ValueError:
+                            raw_values = [0]*6
+                    else:
+                        raw_values = [0]*6
+                else:
+                    raw_values = [0]*6
                 clear_screen()
                 print("\nCurrent Joint Positions:")
-                display_joint_positions(action)
-                time.sleep(0.05)  # Update at 20Hz for smoother display
-            except KeyboardInterrupt:
-                print("\nStopped by user")
-                break
-            except Exception as e:
-                logger.error(f"Error reading action: {e}")
-                break
+                display_joint_positions(raw_values, action)
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nStopped by user")
 
     except Exception as e:
         logger.error(f"Error: {e}")

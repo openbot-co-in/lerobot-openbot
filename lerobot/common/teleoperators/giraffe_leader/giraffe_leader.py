@@ -34,6 +34,14 @@ from .leader_calibration import CalibrationDataGenerator
 
 logger = logging.getLogger(__name__)
 
+# Add this at the top-level (after logger = ...)
+file_handler = logging.FileHandler('giraffe_leader.log')
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+    logger.addHandler(file_handler)
+
 def signed_delta(raw: int, ref: int) -> int:
     return ((raw - ref + 2048) % 4096) - 2048
 
@@ -263,40 +271,38 @@ class GiraffeLeader(Teleoperator):
                         continue
                         
                     # Process the valid data
-                    angles = self.convert_raw_to_degrees(raw_values)
-                    median_filtered_angles = self.apply_median_filter(angles)
-
-                    # Normalize angles to [-100, 100] range for body joints
-                    normalized_angles = []
-                    for i, angle in enumerate(median_filtered_angles[:-1]):  # All except gripper
-                        # Clip to [-90, 90] range first
-                        clipped = self.clip_angle(angle, -90.0, 90.0)
-                        # Normalize to [-100, 100]
-                        normalized = (clipped / 90.0) * 100.0
-                        normalized_angles.append(normalized)
-
-                    # Normalize gripper to [0, 100] range
-                    gripper_value = self.map_value(abs(median_filtered_angles[5]), 0.0, 114.0, 0, 100)
-
-                    action = {
-                        "shoulder_pan.pos": normalized_angles[0],
-                        "shoulder_lift.pos": normalized_angles[1],
-                        "elbow_flex.pos": normalized_angles[2],
-                        "wrist_flex.pos": normalized_angles[3],
-                        "wrist_roll.pos": normalized_angles[4],
-                        "gripper.pos": gripper_value,
-                    }
-
+                    # Use calibrated min, max, and middle values
+                    if self.joint_ranges is None or self.zero_pose is None:
+                        raise RuntimeError("Device must be calibrated before reading values")
+                    joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
+                    action = {}
+                    for i, joint in enumerate(joint_names):
+                        raw = raw_values[i]
+                        min_val, max_val = self.joint_ranges[i]
+                        middle = self.zero_pose[i]
+                        # Shift and unwrap the raw value (same as calibration)
+                        shifted = ((raw - middle + 2048) % 4096) - 2048
+                        range_size = max_val - min_val
+                        if range_size == 0:
+                            normalized = 0.0
+                        elif joint == "gripper":
+                            normalized = (shifted - min_val) / range_size * 100
+                            normalized = max(0.0, min(100.0, normalized))
+                        else:
+                            # Center of shifted range is (min_val + max_val) / 2
+                            normalized = ((shifted - (min_val + max_val) / 2) / (range_size / 2)) * 100
+                            normalized = max(-100.0, min(100.0, normalized))
+                        action[f"{joint}.pos"] = normalized
                     dt_ms = (time.perf_counter() - start) * 1e3
                     logger.debug(f"{self} read action: {dt_ms:.1f}ms")
                     return action
-                    
+                        
                 except Exception as e:
                     logger.warning(f"Error reading data: {e}")
                     continue
-                    
+                        
             raise RuntimeError(f"Failed to read valid data after {max_attempts} attempts")
-            
+                
         except Exception as e:
             logger.error(f"Error reading from {self}: {e}")
             raise RuntimeError(f"Failed to read action: {e}")
@@ -317,3 +323,47 @@ class GiraffeLeader(Teleoperator):
     def __str__(self) -> str:
         """Return a string representation of the device."""
         return f"{self.name}({self.config.id})"
+
+    def _normalize(self, value: int, joint_name: str) -> float:
+        """Normalize joint value: gripper to [0, 100], others to [-100, 100] (0=center)."""
+        if self.joint_ranges is None:
+            raise RuntimeError("Joint ranges not initialized. Please run calibration first.")
+        if joint_name not in self.joint_ranges:
+            raise ValueError(f"Unknown joint: {joint_name}")
+        joint_range = self.joint_ranges[joint_name]
+        range_min = joint_range["range_min"]
+        range_max = joint_range["range_max"]
+        middle = joint_range["middle_position"] if "middle_position" in joint_range else (range_min + range_max) // 2
+        range_size = range_max - range_min
+        if range_size == 0:
+            return 0.0
+        if joint_name == "gripper":
+            # Normalize gripper to [0, 100]
+            normalized = (value - range_min) / (range_size) * 100
+            return max(0.0, min(100.0, normalized))
+        else:
+            # Normalize others to [-100, 100] (0=center)
+            normalized = ((value - middle) / (range_size / 2)) * 100
+            return max(-100.0, min(100.0, normalized))
+
+    def _denormalize(self, value: float, joint_name: str) -> int:
+        """Denormalize joint value: gripper from [0, 100], others from [-100, 100]."""
+        if self.joint_ranges is None:
+            raise RuntimeError("Joint ranges not initialized. Please run calibration first.")
+        if joint_name not in self.joint_ranges:
+            raise ValueError(f"Unknown joint: {joint_name}")
+        joint_range = self.joint_ranges[joint_name]
+        range_min = joint_range["range_min"]
+        range_max = joint_range["range_max"]
+        middle = joint_range["middle_position"] if "middle_position" in joint_range else (range_min + range_max) // 2
+        range_size = range_max - range_min
+        if range_size == 0:
+            return middle
+        if joint_name == "gripper":
+            # Denormalize gripper from [0, 100]
+            raw = range_min + (value / 100) * range_size
+            return max(range_min, min(range_max, int(raw)))
+        else:
+            # Denormalize others from [-100, 100]
+            raw = middle + (value / 100) * (range_size / 2)
+            return max(range_min, min(range_max, int(raw)))
