@@ -263,7 +263,7 @@ class GiraffeLeader(Teleoperator):
                         logger.warning(f"Expected 6 values, got {len(values)}: {values}")
                         continue
                         
-                    # Convert to integers
+                    # Convert to signed integers (may be negative for reversed joints)
                     try:
                         raw_values = [int(v) for v in values]
                     except ValueError as e:
@@ -271,28 +271,37 @@ class GiraffeLeader(Teleoperator):
                         continue
                         
                     # Process the valid data
-                    # Use calibrated min, max, and middle values
                     if self.joint_ranges is None or self.zero_pose is None:
                         raise RuntimeError("Device must be calibrated before reading values")
                     joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
                     action = {}
                     for i, joint in enumerate(joint_names):
                         raw = raw_values[i]
+                        sign = 1 if raw >= 0 else -1
+                        abs_raw = abs(raw)
                         min_val, max_val = self.joint_ranges[i]
                         middle = self.zero_pose[i]
-                        # Shift and unwrap the raw value (same as calibration)
-                        shifted = ((raw - middle + 2048) % 4096) - 2048
+                        shifted = ((abs_raw - middle + 2048) % 4096) - 2048
                         range_size = max_val - min_val
                         if range_size == 0:
                             normalized = 0.0
                         elif joint == "gripper":
                             normalized = (shifted - min_val) / range_size * 100
                             normalized = max(0.0, min(100.0, normalized))
+                            # If sign is negative, invert gripper (100-normalized)
+                            if sign == -1:
+                                normalized = 100.0 - normalized
+                            action[f"{joint}.pos"] = normalized
+                        elif joint == "wrist_roll":
+                            # For continuous rotation, map 0-4095 to -100 to 100
+                            normalized = ((abs_raw - min_val) / range_size) * 200 - 100
+                            normalized = max(-100.0, min(100.0, normalized))
+                            action[f"{joint}.pos"] = normalized
                         else:
-                            # Center of shifted range is (min_val + max_val) / 2
                             normalized = ((shifted - (min_val + max_val) / 2) / (range_size / 2)) * 100
                             normalized = max(-100.0, min(100.0, normalized))
-                        action[f"{joint}.pos"] = normalized
+                            # Reverse sign for all non-gripper joints
+                            action[f"{joint}.pos"] = sign * normalized
                     dt_ms = (time.perf_counter() - start) * 1e3
                     logger.debug(f"{self} read action: {dt_ms:.1f}ms")
                     return action

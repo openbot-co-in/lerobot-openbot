@@ -104,9 +104,9 @@ class CalibrationDataGenerator:
                 if len(values) != 6:
                     continue
                     
-                # Convert to integers
+                # Convert to integers and use abs() to ignore sign
                 try:
-                    raw_values = [int(v) for v in values]
+                    raw_values = [abs(int(v)) for v in values]
                 except ValueError:
                     continue
                     
@@ -235,7 +235,8 @@ class CalibrationDataGenerator:
             for _ in range(self.samples):
                 with self.values_lock:
                     if len(self.values) == 6:
-                        middle_values.append(self.values.copy())
+                        # Use abs() to ignore sign for calibration
+                        middle_values.append([abs(v) for v in self.values])
                 time.sleep(self.sample_delay)
             if not middle_values:
                 raise RuntimeError("No valid middle position values collected")
@@ -245,7 +246,9 @@ class CalibrationDataGenerator:
             logger.info(f"Middle position values: {middle_position}")
             # Step 2: Record full range of motion (unwrapped)
             logger.info("\nStarting Step 2: Full Range of Motion")
-            for joint in self.joints:
+            for idx, joint in enumerate(self.joints):
+                if joint.name == "wrist_roll":
+                    continue  # Skip range calibration for wrist_roll
                 joint.min_val = 4095
                 joint.max_val = 0
                 joint.samples = 0
@@ -262,7 +265,10 @@ class CalibrationDataGenerator:
                     with self.values_lock:
                         if len(self.values) == 6:
                             for i in range(6):
-                                step2_buffer[i].append(self.values[i])
+                                if self.joints[i].name == "wrist_roll":
+                                    continue  # Skip collecting for wrist_roll
+                                # Use abs() to ignore sign for calibration
+                                step2_buffer[i].append(abs(self.values[i]))
                     time.sleep(self.sample_delay)
             collector_thread = threading.Thread(target=collect_step2)
             collector_thread.daemon = True
@@ -274,23 +280,35 @@ class CalibrationDataGenerator:
             # Shift and unwrap all values for each joint
             shifted_unwrapped_ranges = []
             for i in range(6):
+                if self.joints[i].name == "wrist_roll":
+                    shifted_unwrapped_ranges.append([])  # No range for wrist_roll
+                    continue
                 shifted_unwrapped = self._shift_and_unwrap(step2_buffer[i], middle_position[i])
                 shifted_unwrapped_ranges.append(shifted_unwrapped)
             joint_ranges = []
             for i in range(6):
+                if self.joints[i].name == "wrist_roll":
+                    joint_ranges.append((None, None))
+                    continue
                 min_val = int(np.min(shifted_unwrapped_ranges[i]))
                 max_val = int(np.max(shifted_unwrapped_ranges[i]))
                 joint_ranges.append((min_val, max_val))
-            calibration_data = {
-                "middle_position": middle_position,
-                "offsets": middle_position,
-            }
+            calibration_data = {}
+            calibration_data["middle_position"] = middle_position
+            calibration_data["offsets"] = middle_position
             for i, joint in enumerate(self.joints):
-                calibration_data[joint.name] = {
-                    "range_min": joint_ranges[i][0],
-                    "range_max": joint_ranges[i][1],
-                    "offset": middle_position[i]
-                }
+                if joint.name == "wrist_roll":
+                    calibration_data[joint.name] = {
+                        "range_min": 0,
+                        "range_max": 4095,
+                        "offset": middle_position[i]
+                    }
+                else:
+                    calibration_data[joint.name] = {
+                        "range_min": joint_ranges[i][0],
+                        "range_max": joint_ranges[i][1],
+                        "offset": middle_position[i]
+                    }
             with open(output_file, "w") as f:
                 json.dump(calibration_data, f, indent=4)
             logger.info(f"\nCalibration data saved to {output_file}")
