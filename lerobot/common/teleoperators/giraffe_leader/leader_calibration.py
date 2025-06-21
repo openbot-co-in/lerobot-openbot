@@ -295,12 +295,11 @@ class CalibrationDataGenerator:
                 joint_ranges.append((min_val, max_val))
             calibration_data = {}
             calibration_data["middle_position"] = middle_position
-            calibration_data["offsets"] = middle_position
             for i, joint in enumerate(self.joints):
                 if joint.name == "wrist_roll":
                     calibration_data[joint.name] = {
-                        "range_min": 0,
-                        "range_max": 4095,
+                        "range_min": -2048,
+                        "range_max": 2048,
                         "offset": middle_position[i]
                     }
                 else:

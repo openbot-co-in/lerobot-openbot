@@ -294,8 +294,8 @@ class GiraffeLeader(Teleoperator):
                             action[f"{joint}.pos"] = normalized
                         elif joint == "wrist_roll":
                             # For continuous rotation, map 0-4095 to -100 to 100
-                            normalized = ((abs_raw - min_val) / range_size) * 200 - 100
-                            normalized = max(-100.0, min(100.0, normalized))
+                            normalized = ((shifted - min_val) / range_size) * 200 - 100
+                            normalized = max(-100.0, min(100.0, normalized))                                
                             action[f"{joint}.pos"] = normalized
                         else:
                             normalized = ((shifted - (min_val + max_val) / 2) / (range_size / 2)) * 100
