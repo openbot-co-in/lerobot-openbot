@@ -136,7 +136,6 @@ class GiraffeLeader(Teleoperator):
             generator.generate(self.calibration_fpath)
 
         self._load_calibration()
-        print(f"Calibration loaded from {self.calibration_fpath}")
 
     def _load_calibration(self, fpath: Path | None = None) -> None:
         """
@@ -179,10 +178,6 @@ class GiraffeLeader(Teleoperator):
                 else:
                     # Map the full range to [-90, 90] degrees
                     self.slopes.append(180.0 / range_size)
-            
-            print(f"Middle Position: {self.zero_pose}")
-            print(f"Joint Ranges: {self.joint_ranges}")
-            print(f"Slopes: {self.slopes}")
 
     def _save_calibration(self, fpath: Path | None = None) -> None:
         """

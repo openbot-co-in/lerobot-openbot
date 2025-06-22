@@ -136,13 +136,18 @@ class CalibrationDataGenerator:
                 elif step == 2:
                     print("Move all joints except 'wrist_roll' sequentially through their entire ranges of motion.")
                     print("Recording positions. Press ENTER to stop...")
-                    print("\nCurrent joint values:")
+                    print("\n" + "-" * 43)
+                    print(f"{'NAME':<15} | {'MIN':>6} | {'POS':>6} | {'MAX':>6}")
                     for joint in self.joints:
+                        if joint.name == "wrist_roll":
+                            continue  # Skip wrist_roll like giraffe_follower
                         if self.middle_position is not None:
                             shifted_current = self._shift_for_display(joint.current_val, self.middle_position[joint.name_to_index(joint.name)])
-                            print(f"  {joint.name}: {shifted_current}")
+                            shifted_min = self._shift_for_display(joint.min_val, self.middle_position[joint.name_to_index(joint.name)])
+                            shifted_max = self._shift_for_display(joint.max_val, self.middle_position[joint.name_to_index(joint.name)])
+                            print(f"{joint.name:<15} | {shifted_min:>6} | {shifted_current:>6} | {shifted_max:>6}")
                         else:
-                            print(f"  {joint.name}: {joint.current_val}")
+                            print(f"{joint.name:<15} | {joint.min_val:>6} | {joint.current_val:>6} | {joint.max_val:>6}")
                 
                 time.sleep(0.1)
             except Exception as e:
