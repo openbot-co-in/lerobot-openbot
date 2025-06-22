@@ -274,7 +274,9 @@ class GiraffeLeader(Teleoperator):
                     if self.joint_ranges is None or self.zero_pose is None:
                         raise RuntimeError("Device must be calibrated before reading values")
                     joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
-                    action = {}
+                    
+                    # Calculate normalized values for each joint
+                    normalized_values = []
                     for i, joint in enumerate(joint_names):
                         raw = raw_values[i]
                         sign = 1 if raw >= 0 else -1
@@ -291,17 +293,25 @@ class GiraffeLeader(Teleoperator):
                             # If sign is negative, invert gripper (100-normalized)
                             if sign == -1:
                                 normalized = 100.0 - normalized
-                            action[f"{joint}.pos"] = normalized
                         elif joint == "wrist_roll":
                             # For continuous rotation, map 0-4095 to -100 to 100
                             normalized = ((shifted - min_val) / range_size) * 200 - 100
                             normalized = max(-100.0, min(100.0, normalized))                                
-                            action[f"{joint}.pos"] = normalized
                         else:
                             normalized = ((shifted - (min_val + max_val) / 2) / (range_size / 2)) * 100
                             normalized = max(-100.0, min(100.0, normalized))
                             # Reverse sign for all non-gripper joints
-                            action[f"{joint}.pos"] = sign * normalized
+                            normalized = sign * normalized
+                        normalized_values.append(normalized)
+                    
+                    # Apply median filter to the normalized values
+                    filtered_values = self.apply_median_filter(normalized_values)
+                    
+                    # Create action dictionary with filtered values
+                    action = {}
+                    for i, joint in enumerate(joint_names):
+                        action[f"{joint}.pos"] = filtered_values[i]
+                    
                     dt_ms = (time.perf_counter() - start) * 1e3
                     logger.debug(f"{self} read action: {dt_ms:.1f}ms")
                     return action
