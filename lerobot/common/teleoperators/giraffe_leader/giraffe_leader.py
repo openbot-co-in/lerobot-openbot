@@ -88,11 +88,18 @@ class GiraffeLeader(Teleoperator):
             raise DeviceAlreadyConnectedError(f"{self} already connected")
 
         try:
+            # Add delay to allow any previous connections to fully close
+            time.sleep(0.5)
+            
             self.serial_port = serial.Serial(
                 self.config.port,
                 self.config.baud_rate,
                 timeout=1
             )
+            
+            # Clear any buffered data that might be left from previous connections
+            self.serial_port.reset_input_buffer()
+            self.serial_port.reset_output_buffer()
             
             if not self.is_calibrated and calibrate:
                 self.calibrate()
@@ -238,6 +245,27 @@ class GiraffeLeader(Teleoperator):
     def clip_angle(self, angle: float, min_angle: float, max_angle: float) -> float:
         return max(min(angle, max_angle), min_angle)
 
+    def clear_data_backlog(self) -> None:
+        """Clear any accumulated data backlog to ensure real-time readings."""
+        if self.serial_port is None:
+            return
+            
+        try:
+            # Clear all buffered data
+            self.serial_port.reset_input_buffer()
+            self.serial_port.reset_output_buffer()
+            
+            # Read and discard any remaining data for a short period
+            start_time = time.time()
+            while time.time() - start_time < 0.1:  # Clear for 100ms
+                if self.serial_port.in_waiting > 0:
+                    self.serial_port.read(self.serial_port.in_waiting)
+                time.sleep(0.01)
+                
+            logger.info(f"{self} data backlog cleared")
+        except Exception as e:
+            logger.warning(f"Error clearing data backlog: {e}")
+
     def get_action(self) -> dict[str, float]:
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected")
@@ -249,10 +277,14 @@ class GiraffeLeader(Teleoperator):
         try:
             if self.serial_port is None:
                 raise DeviceNotConnectedError(f"{self} is not connected")
+            
+            # Clear any old data to ensure we get current readings
+            if self.serial_port.in_waiting > 100:  # If there's significant backlog
+                self.clear_data_backlog()
                 
             # Read until we get valid data
             max_attempts = 5
-            for _ in range(max_attempts):
+            for attempt in range(max_attempts):
                 try:
                     data = self.serial_port.readline().decode('utf-8').strip()
                     if not data:
@@ -320,7 +352,16 @@ class GiraffeLeader(Teleoperator):
                     return action
                         
                 except Exception as e:
-                    logger.warning(f"Error reading data: {e}")
+                    logger.warning(f"Error reading data (attempt {attempt + 1}/{max_attempts}): {e}")
+                    if attempt == max_attempts - 1:
+                        # On last attempt, try to reset the connection
+                        logger.warning("Attempting to reset serial connection...")
+                        try:
+                            if self.serial_port:
+                                self.serial_port.reset_input_buffer()
+                                self.serial_port.reset_output_buffer()
+                        except Exception as reset_error:
+                            logger.error(f"Failed to reset serial connection: {reset_error}")
                     continue
                         
             raise RuntimeError(f"Failed to read valid data after {max_attempts} attempts")
@@ -337,10 +378,18 @@ class GiraffeLeader(Teleoperator):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected")
 
-        if self.serial_port:
-            self.serial_port.close()
+        try:
+            if self.serial_port:
+                # Clear buffers before closing
+                self.serial_port.reset_input_buffer()
+                self.serial_port.reset_output_buffer()
+                self.serial_port.close()
+                self.serial_port = None
+            logger.info(f"{self} disconnected.")
+        except Exception as e:
+            logger.warning(f"Error during disconnect: {e}")
+            # Force cleanup even if there's an error
             self.serial_port = None
-        logger.info(f"{self} disconnected.")
 
     def __str__(self) -> str:
         """Return a string representation of the device."""
@@ -389,3 +438,17 @@ class GiraffeLeader(Teleoperator):
             # Denormalize others from [-100, 100]
             raw = middle + (value / 100) * (range_size / 2)
             return max(range_min, min(range_max, int(raw)))
+
+    def force_reconnect(self) -> None:
+        """Force reconnection to handle serial port conflicts after follower calibration."""
+        if self.is_connected:
+            self.disconnect()
+        
+        # Wait for port to stabilize
+        time.sleep(1.0)
+        
+        # Reconnect
+        self.connect(calibrate=False)  # Don't recalibrate, just reconnect
+        
+        # Clear any data backlog to ensure real-time readings
+        self.clear_data_backlog()
