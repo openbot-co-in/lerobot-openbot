@@ -120,20 +120,27 @@ class GiraffeLeader(Teleoperator):
 
     @property
     def is_calibrated(self) -> bool:
-        return self.zero_pose is not None and self.joint_ranges is not None and self.slopes is not None
+        # Check if calibration file exists and load it if it does
+        if self.calibration_fpath.is_file():
+            try:
+                if self.zero_pose is None or self.joint_ranges is None or self.slopes is None:
+                    self._load_calibration()
+                return True
+            except Exception:
+                # If loading fails, we're not calibrated
+                return False
+        return False
 
     def calibrate(self) -> None:
         print(f"\nRunning calibration of {self}")
-        if not self.calibration_fpath.exists():
-            print("Calibration file not found. Running calibration process.")
-            generator = CalibrationDataGenerator(
-                serial_port=self.config.port,
-                baud_rate=self.config.baud_rate,
-                samples=10,
-                sample_delay=0.05,
-                device=self
-            )
-            generator.generate(self.calibration_fpath)
+        generator = CalibrationDataGenerator(
+            serial_port=self.config.port,
+            baud_rate=self.config.baud_rate,
+            samples=10,
+            sample_delay=0.05,
+            device=self
+        )
+        generator.generate(self.calibration_fpath)
 
         self._load_calibration()
 
