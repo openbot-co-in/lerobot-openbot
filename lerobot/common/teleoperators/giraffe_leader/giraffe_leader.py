@@ -123,19 +123,20 @@ class GiraffeLeader(Teleoperator):
         return self.zero_pose is not None and self.joint_ranges is not None and self.slopes is not None
 
     def calibrate(self) -> None:
-        logger.info(f"\nRunning calibration of {self}")
+        print(f"\nRunning calibration of {self}")
         if not self.calibration_fpath.exists():
-            logger.info("Calibration file not found. Running calibration process.")
+            print("Calibration file not found. Running calibration process.")
             generator = CalibrationDataGenerator(
                 serial_port=self.config.port,
                 baud_rate=self.config.baud_rate,
                 samples=10,
-                sample_delay=0.05
+                sample_delay=0.05,
+                device=self
             )
             generator.generate(self.calibration_fpath)
 
         self._load_calibration()
-        logger.info(f"Calibration loaded from {self.calibration_fpath}")
+        print(f"Calibration loaded from {self.calibration_fpath}")
 
     def _load_calibration(self, fpath: Path | None = None) -> None:
         """
@@ -179,9 +180,9 @@ class GiraffeLeader(Teleoperator):
                     # Map the full range to [-90, 90] degrees
                     self.slopes.append(180.0 / range_size)
             
-            logger.info(f"Middle Position: {self.zero_pose}")
-            logger.info(f"Joint Ranges: {self.joint_ranges}")
-            logger.info(f"Slopes: {self.slopes}")
+            print(f"Middle Position: {self.zero_pose}")
+            print(f"Joint Ranges: {self.joint_ranges}")
+            print(f"Slopes: {self.slopes}")
 
     def _save_calibration(self, fpath: Path | None = None) -> None:
         """
@@ -202,7 +203,7 @@ class GiraffeLeader(Teleoperator):
         }
         with open(fpath, "w") as f:
             json.dump(data, f, indent=4)
-        logger.info(f"Calibration saved to {fpath}")
+        print(f"Calibration saved to {fpath}")
 
     def convert_raw_to_degrees(self, raw_values: list[int]) -> list[float]:
         if not self.is_calibrated:
@@ -341,7 +342,7 @@ class GiraffeLeader(Teleoperator):
 
     def __str__(self) -> str:
         """Return a string representation of the device."""
-        return f"{self.name}({self.config.id})"
+        return f"{self.id} {self.__class__.__name__}"
 
     def _normalize(self, value: int, joint_name: str) -> float:
         """Normalize joint value: gripper to [0, 100], others to [-100, 100] (0=center)."""
