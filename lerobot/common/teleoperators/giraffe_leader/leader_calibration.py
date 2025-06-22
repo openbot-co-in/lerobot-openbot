@@ -90,11 +90,12 @@ class CalibrationDataGenerator:
 
     def _read_one_raw(self) -> None:
         """Continuously read values from serial port."""
-        if self.ser is None:
-            raise RuntimeError("Serial port is not initialized")
-            
         while self.running:
             try:
+                if self.ser is None:
+                    time.sleep(0.1)
+                    continue
+                    
                 line = self.ser.readline().decode('utf-8').strip()
                 if not line:
                     continue
@@ -119,7 +120,8 @@ class CalibrationDataGenerator:
                         joint.update(value)
                         
             except Exception as e:
-                logger.warning(f"Error reading from serial port: {e}")
+                if self.running:  # Only log if we're still supposed to be running
+                    logger.warning(f"Error reading from serial port: {e}")
                 time.sleep(0.1)  # Add delay on error to prevent tight loop
 
     def _shift_for_display(self, value: int, middle: int) -> int:
