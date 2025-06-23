@@ -139,7 +139,7 @@ class GiraffeLeader(Teleoperator):
         return False
 
     def calibrate(self) -> None:
-        print(f"\nRunning calibration of {self}")
+        logger.info(f"\nRunning calibration of {self}")
         generator = CalibrationDataGenerator(
             serial_port=self.config.port,
             baud_rate=self.config.baud_rate,

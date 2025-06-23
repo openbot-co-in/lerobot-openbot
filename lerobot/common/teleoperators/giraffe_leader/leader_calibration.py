@@ -180,8 +180,6 @@ class CalibrationDataGenerator:
         1. Middle position (homing)
         2. Full range of motion for each joint (unwrapped)
         """
-        print(f"\nRunning calibration of {self.device}")
-        
         try:
             # Delete existing calibration file if it exists
             output_path = Path(output_file).resolve()
@@ -207,7 +205,7 @@ class CalibrationDataGenerator:
             read_thread.start()
             
             # Step 1: Middle position
-            print("Starting Step 1: Middle Position")
+            # print("Starting Step 1: Middle Position")
             self._monitor_values(1)
             input()
             # Sample middle position
